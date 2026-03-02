@@ -1,8 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { SpendRow } from "@/lib/types";
-import { loadSpendData } from "@/lib/data";
+import { useEffect } from "react";
 import { filterRows } from "@/lib/utils";
 import { useSpendStore } from "@/lib/store";
 import KPICards from "@/components/KPICards";
@@ -12,21 +10,15 @@ import Filters from "@/components/Filters";
 import { Loader2 } from "lucide-react";
 
 export default function DashboardPage() {
-  const [allRows, setAllRows] = useState<SpendRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { filters } = useSpendStore();
+  const { spendRows, isLoaded, loadSpendRows, filters } = useSpendStore();
 
   useEffect(() => {
-    loadSpendData()
-      .then(setAllRows)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    loadSpendRows().catch(console.error);
   }, []);
 
-  const filteredRows = filterRows(allRows, filters);
+  const filteredRows = filterRows(spendRows, filters);
 
-  if (loading) {
+  if (!isLoaded) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -34,29 +26,17 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-64 text-red-500">
-        Error: {error}
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Monitor actual vs. planned spend across channels and geographies
+          Monitor actual vs. planned spend across channels, geos, games, and platforms
         </p>
       </div>
-
-      <Filters rows={allRows} />
-
+      <Filters rows={spendRows} />
       <KPICards rows={filteredRows} />
-
       <SpendChart rows={filteredRows} />
-
       <SpendTable rows={filteredRows} />
     </div>
   );

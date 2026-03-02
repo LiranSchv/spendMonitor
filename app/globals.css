@@ -4,26 +4,38 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
+    --background: 240 15% 5%;
+    --foreground: 0 0% 92%;
+    --card: 240 12% 9%;
+    --card-foreground: 0 0% 92%;
+    --popover: 240 12% 9%;
+    --popover-foreground: 0 0% 92%;
+    --primary: 263 75% 62%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 10% 13%;
+    --secondary-foreground: 0 0% 92%;
+    --muted: 240 10% 13%;
+    --muted-foreground: 240 8% 55%;
+    --accent: 263 30% 20%;
+    --accent-foreground: 0 0% 92%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 263 30% 18%;
+    --input: 263 25% 15%;
+    --ring: 263 75% 62%;
     --radius: 0.5rem;
+  }
+}
+
+@layer components {
+  .pill {
+    @apply px-2.5 py-1 rounded-full text-xs font-medium border transition-colors;
+  }
+  .pill-active {
+    @apply bg-primary text-primary-foreground border-primary;
+  }
+  .pill-inactive {
+    @apply bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-foreground;
   }
 }
 
@@ -33,5 +45,28 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+
+  /* Force dark color scheme for native inputs */
+  input[type="date"],
+  input[type="number"],
+  select {
+    color-scheme: dark;
+  }
+
+  /* Custom scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(240 15% 5%);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(263 30% 25%);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(263 50% 40%);
   }
 }

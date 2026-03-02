@@ -1,5 +1,5 @@
-import { SpendRow, ForecastRow, AggregatedRow, CompareRow, ForecastVersion } from "./types";
-import { format, startOfWeek, startOfMonth, getQuarter, getYear } from "date-fns";
+import { SpendRow, ForecastRow, AggregatedRow, CompareRow, ForecastVersion, Period, Game, Platform } from "./types";
+import { parseISO, format, startOfWeek, getQuarter, getYear, addWeeks, isAfter, isBefore, isEqual } from "date-fns";
 
 export function formatCurrency(value: number): string {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
@@ -7,73 +7,73 @@ export function formatCurrency(value: number): string {
   return `$${value.toLocaleString()}`;
 }
 
-export function getPeriodKey(dateStr: string, period: "week" | "month" | "quarter"): string {
-  const date = new Date(dateStr);
+export function getPeriodKey(dateStr: string, period: Period): string {
+  const date = parseISO(dateStr);
   if (period === "week") {
     const weekStart = startOfWeek(date, { weekStartsOn: 1 });
     return format(weekStart, "yyyy-MM-dd");
   }
-  if (period === "month") {
-    return format(date, "yyyy-MM");
-  }
-  // quarter
-  return `${getYear(date)}-Q${getQuarter(date)}`;
+  if (period === "month") return format(date, "yyyy-MM");
+  if (period === "quarter") return `${getYear(date)}-Q${getQuarter(date)}`;
+  return String(getYear(date)); // year
 }
 
-export function getPeriodLabel(key: string, period: "week" | "month" | "quarter"): string {
-  if (period === "week") return `Week of ${key}`;
+export function getPeriodLabel(key: string, period: Period): string {
+  if (period === "week") return `Wk ${key.slice(5)}`;
   if (period === "month") {
     const [year, month] = key.split("-");
-    const date = new Date(Number(year), Number(month) - 1, 1);
+    const date = parseISO(`${year}-${month}-01`);
     return format(date, "MMM yyyy");
   }
-  return key; // e.g. "2024-Q1"
+  if (period === "quarter") return key;
+  return key; // year: "2024"
+}
+
+// ── Aggregation ──────────────────────────────────────────────────────────────
+
+function toAggRow(key: string, label: string, actual: number, planned: number): AggregatedRow {
+  const variance = actual - planned;
+  const variancePct = planned > 0 ? (variance / planned) * 100 : 0;
+  return { key, label, actual_spend: actual, planned_spend: planned, variance, variancePct };
+}
+
+function aggregateByDimension(rows: SpendRow[], getDim: (r: SpendRow) => string): AggregatedRow[] {
+  const map = new Map<string, { actual: number; planned: number }>();
+  for (const row of rows) {
+    const key = getDim(row);
+    const existing = map.get(key) ?? { actual: 0, planned: 0 };
+    existing.actual += row.actual_spend;
+    existing.planned += row.planned_spend;
+    map.set(key, existing);
+  }
+  return Array.from(map.entries())
+    .map(([k, v]) => toAggRow(k, k, v.actual, v.planned))
+    .sort((a, b) => b.actual_spend - a.actual_spend);
 }
 
 export function aggregateByChannel(rows: SpendRow[]): AggregatedRow[] {
-  const map = new Map<string, { actual: number; planned: number }>();
-  for (const row of rows) {
-    const existing = map.get(row.channel) ?? { actual: 0, planned: 0 };
-    existing.actual += row.actual_spend;
-    existing.planned += row.planned_spend;
-    map.set(row.channel, existing);
-  }
-  return Array.from(map.entries())
-    .map(([channel, vals]) => ({
-      key: channel,
-      label: channel,
-      actual_spend: vals.actual,
-      planned_spend: vals.planned,
-      variance: vals.actual - vals.planned,
-      variancePct: vals.planned > 0 ? ((vals.actual - vals.planned) / vals.planned) * 100 : 0,
-    }))
-    .sort((a, b) => b.actual_spend - a.actual_spend);
+  return aggregateByDimension(rows, (r) => r.channel);
 }
 
 export function aggregateByGeo(rows: SpendRow[]): AggregatedRow[] {
-  const map = new Map<string, { actual: number; planned: number }>();
-  for (const row of rows) {
-    const existing = map.get(row.geo) ?? { actual: 0, planned: 0 };
-    existing.actual += row.actual_spend;
-    existing.planned += row.planned_spend;
-    map.set(row.geo, existing);
-  }
-  return Array.from(map.entries())
-    .map(([geo, vals]) => ({
-      key: geo,
-      label: geo,
-      actual_spend: vals.actual,
-      planned_spend: vals.planned,
-      variance: vals.actual - vals.planned,
-      variancePct: vals.planned > 0 ? ((vals.actual - vals.planned) / vals.planned) * 100 : 0,
-    }))
-    .sort((a, b) => b.actual_spend - a.actual_spend);
+  return aggregateByDimension(rows, (r) => r.geo);
 }
 
-export function aggregateByPeriod(
-  rows: SpendRow[],
-  period: "week" | "month" | "quarter"
-): AggregatedRow[] {
+export function aggregateByGame(rows: SpendRow[]): AggregatedRow[] {
+  return aggregateByDimension(rows, (r) => r.game);
+}
+
+export function aggregateByPlatform(rows: SpendRow[]): AggregatedRow[] {
+  return aggregateByDimension(rows, (r) => r.platform);
+}
+
+export function aggregateByAll(rows: SpendRow[]): AggregatedRow[] {
+  const actual = rows.reduce((s, r) => s + r.actual_spend, 0);
+  const planned = rows.reduce((s, r) => s + r.planned_spend, 0);
+  return [toAggRow("all", "All", actual, planned)];
+}
+
+export function aggregateByPeriod(rows: SpendRow[], period: Period): AggregatedRow[] {
   const map = new Map<string, { actual: number; planned: number }>();
   for (const row of rows) {
     const key = getPeriodKey(row.date, period);
@@ -84,29 +84,18 @@ export function aggregateByPeriod(
   }
   return Array.from(map.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, vals]) => ({
-      key,
-      label: getPeriodLabel(key, period),
-      actual_spend: vals.actual,
-      planned_spend: vals.planned,
-      variance: vals.actual - vals.planned,
-      variancePct: vals.planned > 0 ? ((vals.actual - vals.planned) / vals.planned) * 100 : 0,
-    }));
+    .map(([key, vals]) => toAggRow(key, getPeriodLabel(key, period), vals.actual, vals.planned));
 }
 
-export function getUniqueChannels(rows: SpendRow[]): string[] {
-  return Array.from(new Set(rows.map((r) => r.channel))).sort();
-}
-
-export function getUniqueGeos(rows: SpendRow[]): string[] {
-  return Array.from(new Set(rows.map((r) => r.geo))).sort();
-}
+// ── Filtering ─────────────────────────────────────────────────────────────────
 
 export function filterRows(
   rows: SpendRow[],
   filters: {
     channels: string[];
     geos: string[];
+    games: string[];
+    platforms: string[];
     startDate?: string;
     endDate?: string;
   }
@@ -114,13 +103,35 @@ export function filterRows(
   return rows.filter((row) => {
     if (filters.channels.length > 0 && !filters.channels.includes(row.channel)) return false;
     if (filters.geos.length > 0 && !filters.geos.includes(row.geo)) return false;
+    if (filters.games.length > 0 && !filters.games.includes(row.game)) return false;
+    if (filters.platforms.length > 0 && !filters.platforms.includes(row.platform)) return false;
     if (filters.startDate && row.date < filters.startDate) return false;
     if (filters.endDate && row.date > filters.endDate) return false;
     return true;
   });
 }
 
-export function buildTimeSeriesData(rows: SpendRow[], period: "week" | "month" | "quarter") {
+// ── Unique value helpers ───────────────────────────────────────────────────────
+
+export function getUniqueChannels(rows: (SpendRow | ForecastRow)[]): string[] {
+  return Array.from(new Set(rows.map((r) => r.channel))).sort();
+}
+
+export function getUniqueGeos(rows: (SpendRow | ForecastRow)[]): string[] {
+  return Array.from(new Set(rows.map((r) => r.geo))).sort();
+}
+
+export function getUniqueGames(rows: SpendRow[] | ForecastRow[]): Game[] {
+  return Array.from(new Set(rows.map((r) => r.game))).sort() as Game[];
+}
+
+export function getUniquePlatforms(rows: SpendRow[] | ForecastRow[]): Platform[] {
+  return Array.from(new Set(rows.map((r) => r.platform))).sort() as Platform[];
+}
+
+// ── Time series for chart ─────────────────────────────────────────────────────
+
+export function buildTimeSeriesData(rows: SpendRow[], period: Period) {
   const map = new Map<string, { actual: number; planned: number }>();
   for (const row of rows) {
     const key = getPeriodKey(row.date, period);
@@ -138,74 +149,130 @@ export function buildTimeSeriesData(rows: SpendRow[], period: "week" | "month" |
     }));
 }
 
-// Build forecast rows from actual rows (as starting point)
-export function buildInitialForecast(rows: SpendRow[]): ForecastRow[] {
-  return rows.map((row) => ({
-    date: row.date,
-    channel: row.channel,
-    geo: row.geo,
-    forecast_spend: row.actual_spend,
-  }));
+// ── Forecast helpers ──────────────────────────────────────────────────────────
+
+export function buildFutureForecastSkeleton(
+  actualRows: SpendRow[],
+  fromDate: string,  // YYYY-MM-DD (Monday)
+  toDate: string     // YYYY-MM-DD (Monday, inclusive)
+): ForecastRow[] {
+  // Get all unique combos
+  const channels = getUniqueChannels(actualRows);
+  const geos = getUniqueGeos(actualRows);
+  const games = getUniqueGames(actualRows);
+  const platforms = getUniquePlatforms(actualRows);
+
+  // Build last-4-weeks average per combo key
+  const sortedDates = Array.from(new Set(actualRows.map((r) => r.date))).sort();
+  const last4Dates = sortedDates.slice(-4);
+
+  const avgMap = new Map<string, number>();
+  for (const row of actualRows) {
+    if (!last4Dates.includes(row.date)) continue;
+    const key = `${row.channel}|${row.geo}|${row.game}|${row.platform}`;
+    avgMap.set(key, (avgMap.get(key) ?? 0) + row.actual_spend);
+  }
+  // Divide by count of matching dates per combo
+  for (const [key, total] of avgMap.entries()) {
+    avgMap.set(key, Math.round(total / last4Dates.length));
+  }
+
+  // Generate weeks in range
+  const weeks: string[] = [];
+  let cursor = parseISO(fromDate);
+  const end = parseISO(toDate);
+  while (isBefore(cursor, end) || isEqual(cursor, end)) {
+    weeks.push(format(cursor, "yyyy-MM-dd"));
+    cursor = addWeeks(cursor, 1);
+  }
+
+  // Build rows
+  const result: ForecastRow[] = [];
+  for (const week of weeks) {
+    for (const channel of channels) {
+      for (const geo of geos) {
+        for (const game of games) {
+          for (const platform of platforms) {
+            const key = `${channel}|${geo}|${game}|${platform}`;
+            result.push({
+              date: week,
+              channel,
+              geo,
+              game: game as Game,
+              platform: platform as Platform,
+              forecast_spend: avgMap.get(key) ?? 0,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
-// Compare two value sets by channel/geo/period
+// ── Compare helpers ────────────────────────────────────────────────────────────
+
 export function buildCompareRows(
   rowsA: { key: string; label: string; value: number }[],
   rowsB: { key: string; label: string; value: number }[]
 ): CompareRow[] {
   const mapA = new Map(rowsA.map((r) => [r.key, r]));
   const mapB = new Map(rowsB.map((r) => [r.key, r]));
-  const keys = new Set([...mapA.keys(), ...mapB.keys()]);
+  const keys = Array.from(new Set([...Array.from(mapA.keys()), ...Array.from(mapB.keys())]));
 
-  return Array.from(keys).map((key) => {
+  return keys.map((key) => {
     const a = mapA.get(key);
     const b = mapB.get(key);
     const valA = a?.value ?? 0;
     const valB = b?.value ?? 0;
     const delta = valB - valA;
     const deltaPct = valA !== 0 ? (delta / valA) * 100 : 0;
-    return {
-      key,
-      label: a?.label ?? b?.label ?? key,
-      valueA: valA,
-      valueB: valB,
-      delta,
-      deltaPct,
-    };
+    return { key, label: a?.label ?? b?.label ?? key, valueA: valA, valueB: valB, delta, deltaPct };
   });
 }
 
-// Get aggregated values from forecast version for comparison
-export function aggregateForecastByChannel(version: ForecastVersion): AggregatedRow[] {
+export function aggregateForecastByDimension(
+  version: ForecastVersion,
+  getDim: (r: ForecastRow) => string
+): { key: string; label: string; value: number }[] {
   const map = new Map<string, number>();
   for (const row of version.rows) {
-    map.set(row.channel, (map.get(row.channel) ?? 0) + row.forecast_spend);
+    const key = getDim(row);
+    map.set(key, (map.get(key) ?? 0) + row.forecast_spend);
   }
   return Array.from(map.entries())
-    .map(([channel, val]) => ({
-      key: channel,
-      label: channel,
-      actual_spend: val,
-      planned_spend: 0,
-      variance: 0,
-      variancePct: 0,
-    }))
-    .sort((a, b) => b.actual_spend - a.actual_spend);
+    .map(([key, value]) => ({ key, label: key, value }))
+    .sort((a, b) => b.value - a.value);
 }
 
-export function aggregateForecastByGeo(version: ForecastVersion): AggregatedRow[] {
-  const map = new Map<string, number>();
-  for (const row of version.rows) {
-    map.set(row.geo, (map.get(row.geo) ?? 0) + row.forecast_spend);
-  }
-  return Array.from(map.entries())
-    .map(([geo, val]) => ({
-      key: geo,
-      label: geo,
-      actual_spend: val,
-      planned_spend: 0,
-      variance: 0,
-      variancePct: 0,
-    }))
-    .sort((a, b) => b.actual_spend - a.actual_spend);
+export function aggregateForecastByChannel(version: ForecastVersion) {
+  return aggregateForecastByDimension(version, (r) => r.channel);
+}
+
+export function aggregateForecastByGeo(version: ForecastVersion) {
+  return aggregateForecastByDimension(version, (r) => r.geo);
+}
+
+export function aggregateForecastByGame(version: ForecastVersion) {
+  return aggregateForecastByDimension(version, (r) => r.game);
+}
+
+export function aggregateForecastByPlatform(version: ForecastVersion) {
+  return aggregateForecastByDimension(version, (r) => r.platform);
+}
+
+// ── Next Monday helper ─────────────────────────────────────────────────────────
+
+export function getNextMonday(fromDateStr: string): string {
+  const date = parseISO(fromDateStr);
+  const day = date.getDay(); // 0=Sun, 1=Mon, ...
+  const daysUntilMonday = day === 0 ? 1 : (8 - day) % 7 || 7;
+  const monday = new Date(date);
+  monday.setDate(date.getDate() + (day === 1 ? 0 : daysUntilMonday));
+  return format(monday, "yyyy-MM-dd");
+}
+
+export function addWeeksToDate(dateStr: string, weeks: number): string {
+  return format(addWeeks(parseISO(dateStr), weeks), "yyyy-MM-dd");
 }

@@ -25,7 +25,9 @@ export async function GET() {
       return row as unknown as SpendRow;
     });
 
-    return NextResponse.json(rows);
+    return NextResponse.json(rows, {
+      headers: { "Cache-Control": "public, max-age=3600" },
+    });
   } catch (error) {
     console.error("Error loading spend data:", error);
     return NextResponse.json({ error: "Failed to load spend data" }, { status: 500 });

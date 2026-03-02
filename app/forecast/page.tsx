@@ -1,40 +1,40 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { SpendRow } from "@/lib/types";
-import { loadSpendData } from "@/lib/data";
 import { useSpendStore } from "@/lib/store";
 import ForecastEditor from "@/components/ForecastEditor";
-import { Loader2, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { buildFutureForecastSkeleton, getNextMonday, addWeeksToDate } from "@/lib/utils";
+import { Loader2 } from "lucide-react";
+
+const TODAY = "2026-03-02";
+const FORECAST_START = getNextMonday(TODAY);          // 2026-03-03
+const DEFAULT_END = addWeeksToDate(FORECAST_START, 13); // 3 months default
 
 export default function ForecastPage() {
-  const [allRows, setAllRows] = useState<SpendRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const { currentForecastRows, initForecastFromActual } = useSpendStore();
+  const { spendRows, isLoaded, loadSpendRows, currentForecastRows, setCurrentForecastRows } = useSpendStore();
+  const [forecastEnd, setForecastEnd] = useState(DEFAULT_END);
 
   useEffect(() => {
-    loadSpendData()
-      .then((rows) => {
-        setAllRows(rows);
-        // Only init if no forecast rows exist
-        if (currentForecastRows.length === 0) {
-          initForecastFromActual(rows);
-        }
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    loadSpendRows().catch(console.error);
   }, []);
 
-  const handleReset = () => {
-    if (allRows.length > 0) {
-      initForecastFromActual(allRows);
-    }
+  // Init or rebuild forecast skeleton when data loads or end date changes
+  useEffect(() => {
+    if (!isLoaded || spendRows.length === 0) return;
+    if (currentForecastRows.length > 0) return; // don't reset existing edits
+    const skeleton = buildFutureForecastSkeleton(spendRows, FORECAST_START, forecastEnd);
+    setCurrentForecastRows(skeleton);
+  }, [isLoaded]);
+
+  const handleEndDateChange = (newEnd: string) => {
+    setForecastEnd(newEnd);
+    if (!isLoaded || spendRows.length === 0) return;
+    // Rebuild skeleton (resets edits — this is intentional for range changes)
+    const skeleton = buildFutureForecastSkeleton(spendRows, FORECAST_START, newEnd);
+    setCurrentForecastRows(skeleton);
   };
 
-  if (loading) {
+  if (!isLoaded) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -42,34 +42,25 @@ export default function ForecastPage() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-64 text-red-500">
-        Error: {error}
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Forecast Builder</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Edit spend forecasts by channel and geo, save versions for comparison
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={handleReset} className="gap-1.5">
-          <RefreshCw className="h-3.5 w-3.5" />
-          Reset to Actual
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Forecast Builder</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Build forward-looking spend forecasts from {FORECAST_START} · Use bulk edit or AI assistant to update values
+        </p>
       </div>
 
       {currentForecastRows.length > 0 ? (
-        <ForecastEditor rows={currentForecastRows} />
+        <ForecastEditor
+          rows={currentForecastRows}
+          forecastStart={FORECAST_START}
+          forecastEnd={forecastEnd}
+          onEndDateChange={handleEndDateChange}
+        />
       ) : (
         <div className="flex items-center justify-center h-32 text-muted-foreground">
-          No forecast data. Loading...
+          Generating forecast skeleton…
         </div>
       )}
     </div>
