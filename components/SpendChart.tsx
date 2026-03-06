@@ -1,15 +1,24 @@
 "use client";
 
 import { SpendRow, Period } from "@/lib/types";
-import { buildCombinedTimeSeries, formatCurrency } from "@/lib/utils";
+import {
+  buildCombinedTimeSeries,
+  buildFutureForecastSkeleton,
+  filterForecastRows,
+  formatCurrency,
+} from "@/lib/utils";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  Legend, ResponsiveContainer, ReferenceLine,
+  ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { useState, useMemo } from "react";
 import { useSpendStore } from "@/lib/store";
+
+// Last Monday of actual data → first forecast Monday → last Monday of 2026
+const FORECAST_FROM = "2026-03-02";
+const FORECAST_TO   = "2026-12-28";
 
 type Props = { rows: SpendRow[] };
 type DimOption = "all" | "channel" | "geo" | "game" | "platform";
@@ -25,7 +34,7 @@ const AXIS_COLOR = "hsl(240 8% 45%)";
 
 function CustomTooltip({ active, payload, label }: {
   active?: boolean;
-  payload?: { name: string; value: number; color: string; strokeDasharray?: string }[];
+  payload?: { name: string; value: number; color: string }[];
   label?: string;
 }) {
   if (!active || !payload?.length) return null;
@@ -43,9 +52,7 @@ function CustomTooltip({ active, payload, label }: {
   );
 }
 
-function CustomLegend({ dimValues, palette, hasForecast }: {
-  dimValues: string[]; palette: string[]; hasForecast: boolean;
-}) {
+function CustomLegend({ dimValues, palette }: { dimValues: string[]; palette: string[] }) {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1.5 justify-center mt-2">
       {dimValues.map((dv, i) => {
@@ -53,33 +60,21 @@ function CustomLegend({ dimValues, palette, hasForecast }: {
         const label = dv === "total" ? "" : dv;
         return (
           <div key={dv} className="flex items-center gap-1.5">
-            {/* Actual: solid line swatch */}
             <svg width="20" height="10">
               <line x1="0" y1="5" x2="20" y2="5" stroke={color} strokeWidth="2" />
             </svg>
-            {hasForecast && (
-              <>
-                <svg width="20" height="10">
-                  <line x1="0" y1="5" x2="20" y2="5" stroke={color} strokeWidth="2" strokeDasharray="5 3" />
-                </svg>
-              </>
-            )}
+            <svg width="20" height="10">
+              <line x1="0" y1="5" x2="20" y2="5" stroke={color} strokeWidth="2" strokeDasharray="5 3" />
+            </svg>
             {label && <span className="text-xs text-muted-foreground">{label}</span>}
           </div>
         );
       })}
-      {/* Global legend indicators */}
       <div className="flex items-center gap-3 border-l border-border pl-3 ml-1">
         <div className="flex items-center gap-1">
-          <svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#9ca3af" strokeWidth="2" /></svg>
-          <span className="text-xs text-muted-foreground">Actual</span>
+          <svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#9ca3af" strokeWidth="2" strokeDasharray="5 3" /></svg>
+          <span className="text-xs text-muted-foreground">Forecast</span>
         </div>
-        {hasForecast && (
-          <div className="flex items-center gap-1">
-            <svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#9ca3af" strokeWidth="2" strokeDasharray="5 3" /></svg>
-            <span className="text-xs text-muted-foreground">Forecast</span>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -88,13 +83,24 @@ function CustomLegend({ dimValues, palette, hasForecast }: {
 export default function SpendChart({ rows }: Props) {
   const [period, setPeriod] = useState<Period>("month");
   const [dimension, setDimension] = useState<DimOption>("all");
-  const { currentForecastRows } = useSpendStore();
+  const { spendRows, currentForecastRows, filters } = useSpendStore();
 
-  const hasForecast = currentForecastRows.length > 0;
+  // Use the store's forecast if one is set; otherwise auto-generate a baseline
+  // forecast from the last actual date through end of 2026.
+  const forecastSource = useMemo(() => {
+    if (currentForecastRows.length > 0) return currentForecastRows;
+    if (spendRows.length === 0) return [];
+    return buildFutureForecastSkeleton(spendRows, FORECAST_FROM, FORECAST_TO);
+  }, [currentForecastRows, spendRows]);
+
+  const filteredForecastRows = useMemo(
+    () => filterForecastRows(forecastSource, filters),
+    [forecastSource, filters]
+  );
 
   const { data, dimValues, todayLabel } = useMemo(
-    () => buildCombinedTimeSeries(rows, hasForecast ? currentForecastRows : [], period, dimension),
-    [rows, currentForecastRows, period, dimension, hasForecast]
+    () => buildCombinedTimeSeries(rows, filteredForecastRows, period, dimension),
+    [rows, filteredForecastRows, period, dimension]
   );
 
   const yFmt = (v: number) => formatCurrency(v);
@@ -104,15 +110,12 @@ export default function SpendChart({ rows }: Props) {
     tickLine: false,
   };
 
-  // For monthly/quarterly/yearly views, reduce X-axis tick density
-  const tickCount = period === "week" ? 12 : undefined;
-
   return (
     <Card className="border-border bg-card">
       <CardHeader className="flex flex-row items-center justify-between pb-4 flex-wrap gap-2">
         <CardTitle className="text-base font-semibold text-foreground">
           Spend Trend
-          {hasForecast && <span className="text-xs font-normal text-muted-foreground ml-2">— solid: actual · dashed: forecast</span>}
+          <span className="text-xs font-normal text-muted-foreground ml-2">— solid: actual · dashed: forecast</span>
         </CardTitle>
         <div className="flex items-center gap-2">
           <Select value={dimension} onChange={(e) => setDimension(e.target.value as DimOption)} className="w-32">
@@ -134,11 +137,10 @@ export default function SpendChart({ rows }: Props) {
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} />
-            <XAxis dataKey="date" {...commonAxisProps} interval={tickCount ? "preserveStartEnd" : undefined} />
+            <XAxis dataKey="date" {...commonAxisProps} interval={period === "week" ? "preserveStartEnd" : undefined} />
             <YAxis tickFormatter={yFmt} width={72} {...commonAxisProps} />
             <Tooltip content={<CustomTooltip />} />
 
-            {/* Today reference line */}
             <ReferenceLine
               x={todayLabel}
               stroke="hsl(263 50% 50%)"
@@ -161,25 +163,23 @@ export default function SpendChart({ rows }: Props) {
                   connectNulls={false}
                   legendType="none"
                 />,
-                hasForecast && (
-                  <Line
-                    key={`${dv}_forecast`}
-                    dataKey={`${dv}_forecast`}
-                    stroke={color}
-                    strokeWidth={2}
-                    strokeDasharray="6 3"
-                    dot={false}
-                    name={`Forecast${label}`}
-                    connectNulls={false}
-                    legendType="none"
-                  />
-                ),
+                <Line
+                  key={`${dv}_forecast`}
+                  dataKey={`${dv}_forecast`}
+                  stroke={color}
+                  strokeWidth={2}
+                  strokeDasharray="6 3"
+                  dot={false}
+                  name={`Forecast${label}`}
+                  connectNulls={false}
+                  legendType="none"
+                />,
               ];
             })}
           </LineChart>
         </ResponsiveContainer>
 
-        <CustomLegend dimValues={dimValues} palette={PALETTE} hasForecast={hasForecast} />
+        <CustomLegend dimValues={dimValues} palette={PALETTE} />
       </CardContent>
     </Card>
   );

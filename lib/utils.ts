@@ -89,17 +89,28 @@ export function aggregateByPeriod(rows: SpendRow[], period: Period): AggregatedR
 
 // ── Filtering ─────────────────────────────────────────────────────────────────
 
-export function filterRows(
-  rows: SpendRow[],
-  filters: {
-    channels: string[];
-    geos: string[];
-    games: string[];
-    platforms: string[];
-    startDate?: string;
-    endDate?: string;
-  }
-): SpendRow[] {
+type DimFilters = {
+  channels: string[];
+  geos: string[];
+  games: string[];
+  platforms: string[];
+  startDate?: string;
+  endDate?: string;
+};
+
+export function filterRows(rows: SpendRow[], filters: DimFilters): SpendRow[] {
+  return rows.filter((row) => {
+    if (filters.channels.length > 0 && !filters.channels.includes(row.channel)) return false;
+    if (filters.geos.length > 0 && !filters.geos.includes(row.geo)) return false;
+    if (filters.games.length > 0 && !filters.games.includes(row.game)) return false;
+    if (filters.platforms.length > 0 && !filters.platforms.includes(row.platform)) return false;
+    if (filters.startDate && row.date < filters.startDate) return false;
+    if (filters.endDate && row.date > filters.endDate) return false;
+    return true;
+  });
+}
+
+export function filterForecastRows(rows: ForecastRow[], filters: DimFilters): ForecastRow[] {
   return rows.filter((row) => {
     if (filters.channels.length > 0 && !filters.channels.includes(row.channel)) return false;
     if (filters.geos.length > 0 && !filters.geos.includes(row.geo)) return false;
@@ -168,6 +179,14 @@ export function buildCombinedTimeSeries(
     const dv = getDimVal(row);
     if (!forecastMap.has(pk)) forecastMap.set(pk, new Map());
     forecastMap.get(pk)!.set(dv, (forecastMap.get(pk)!.get(dv) ?? 0) + row.forecast_spend);
+  }
+
+  // Bridge: duplicate the last actual period into the forecast map so the
+  // dashed forecast line visually connects to the end of the solid actual line.
+  const sortedActualKeys = Array.from(actualMap.keys()).sort();
+  const lastActualKey = sortedActualKeys[sortedActualKeys.length - 1];
+  if (lastActualKey && forecastMap.size > 0 && !forecastMap.has(lastActualKey)) {
+    forecastMap.set(lastActualKey, new Map(actualMap.get(lastActualKey)!));
   }
 
   const allKeys = Array.from(

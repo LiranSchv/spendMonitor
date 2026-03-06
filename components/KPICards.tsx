@@ -3,7 +3,7 @@
 import { SpendRow } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, DollarSign, BarChart3, Globe, Gamepad2 } from "lucide-react";
+import { DollarSign, BarChart3, Globe, Gamepad2 } from "lucide-react";
 
 type Props = {
   rows: SpendRow[];
@@ -12,8 +12,6 @@ type Props = {
 export default function KPICards({ rows }: Props) {
   const totalActual = rows.reduce((sum, r) => sum + r.actual_spend, 0);
   const totalPlanned = rows.reduce((sum, r) => sum + r.planned_spend, 0);
-  const vsPlanPct = totalPlanned > 0 ? ((totalActual - totalPlanned) / totalPlanned) * 100 : 0;
-  const isOverPlan = vsPlanPct > 0;
 
   const channelMap = new Map<string, number>();
   for (const row of rows) {
@@ -41,13 +39,6 @@ export default function KPICards({ rows }: Props) {
       icon: DollarSign,
     },
     {
-      title: "vs. Plan",
-      value: `${isOverPlan ? "+" : ""}${vsPlanPct.toFixed(1)}%`,
-      sub: isOverPlan ? "Over budget" : "Under budget",
-      icon: isOverPlan ? TrendingUp : TrendingDown,
-      valueClass: isOverPlan ? "text-red-400" : "text-green-400",
-    },
-    {
       title: "Top Channel",
       value: topChannel?.[0] ?? "—",
       sub: topChannel ? formatCurrency(topChannel[1]) : "",
@@ -68,7 +59,7 @@ export default function KPICards({ rows }: Props) {
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       {kpis.map((kpi) => {
         const Icon = kpi.icon;
         return (
@@ -77,7 +68,7 @@ export default function KPICards({ rows }: Props) {
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-muted-foreground truncate">{kpi.title}</p>
-                  <p className={`text-xl font-bold mt-1 truncate ${kpi.valueClass ?? "text-primary"}`}>
+                  <p className="text-xl font-bold mt-1 truncate text-primary">
                     {kpi.value}
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5 truncate">{kpi.sub}</p>

@@ -75,7 +75,7 @@ export default function Filters({ rows }: Props) {
 
   const dates = rows.map((r) => r.date).sort();
   const minDate = dates[0] ?? "";
-  const maxDate = dates[dates.length - 1] ?? "";
+  const maxDate = "2026-12-31";
 
   const hasActiveFilters =
     filters.channels.length > 0 ||
