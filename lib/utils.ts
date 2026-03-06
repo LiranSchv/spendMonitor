@@ -146,7 +146,8 @@ const TODAY = "2026-03-06";
 
 export function buildCombinedTimeSeries(
   actualRows: SpendRow[],
-  forecastRows: ForecastRow[],
+  forecastRowsA: ForecastRow[],
+  forecastRowsB: ForecastRow[],
   period: Period,
   dimension: "all" | "channel" | "geo" | "game" | "platform"
 ): { data: Record<string, number | string | null>[]; dimValues: string[]; todayLabel: string } {
@@ -159,7 +160,8 @@ export function buildCombinedTimeSeries(
       : Array.from(
           new Set([
             ...actualRows.map((r) => r[dimension as keyof SpendRow] as string),
-            ...forecastRows.map((r) => r[dimension as keyof ForecastRow] as string),
+            ...forecastRowsA.map((r) => r[dimension as keyof ForecastRow] as string),
+            ...forecastRowsB.map((r) => r[dimension as keyof ForecastRow] as string),
           ])
         ).sort();
 
@@ -172,32 +174,45 @@ export function buildCombinedTimeSeries(
     actualMap.get(pk)!.set(dv, (actualMap.get(pk)!.get(dv) ?? 0) + row.actual_spend);
   }
 
-  // Aggregate forecast by (periodKey, dimVal)
-  const forecastMap = new Map<string, Map<string, number>>();
-  for (const row of forecastRows) {
-    const pk = getPeriodKey(row.date, period);
-    const dv = getDimVal(row);
-    if (!forecastMap.has(pk)) forecastMap.set(pk, new Map());
-    forecastMap.get(pk)!.set(dv, (forecastMap.get(pk)!.get(dv) ?? 0) + row.forecast_spend);
-  }
+  // Aggregate forecastA and forecastB by (periodKey, dimVal)
+  const buildForecastMap = (rows: ForecastRow[]) => {
+    const map = new Map<string, Map<string, number>>();
+    for (const row of rows) {
+      const pk = getPeriodKey(row.date, period);
+      const dv = getDimVal(row);
+      if (!map.has(pk)) map.set(pk, new Map());
+      map.get(pk)!.set(dv, (map.get(pk)!.get(dv) ?? 0) + row.forecast_spend);
+    }
+    return map;
+  };
+  const forecastMapA = buildForecastMap(forecastRowsA);
+  const forecastMapB = buildForecastMap(forecastRowsB);
 
-  // Bridge: duplicate the last actual period into the forecast map so the
-  // dashed forecast line visually connects to the end of the solid actual line.
+  // Bridge: duplicate the last actual period into each forecast map so the
+  // dashed forecast lines visually connect to the end of the solid actual line.
   const sortedActualKeys = Array.from(actualMap.keys()).sort();
   const lastActualKey = sortedActualKeys[sortedActualKeys.length - 1];
-  if (lastActualKey && forecastMap.size > 0 && !forecastMap.has(lastActualKey)) {
-    forecastMap.set(lastActualKey, new Map(actualMap.get(lastActualKey)!));
+  if (lastActualKey) {
+    if (forecastMapA.size > 0 && !forecastMapA.has(lastActualKey))
+      forecastMapA.set(lastActualKey, new Map(actualMap.get(lastActualKey)!));
+    if (forecastMapB.size > 0 && !forecastMapB.has(lastActualKey))
+      forecastMapB.set(lastActualKey, new Map(actualMap.get(lastActualKey)!));
   }
 
   const allKeys = Array.from(
-    new Set([...Array.from(actualMap.keys()), ...Array.from(forecastMap.keys())])
+    new Set([
+      ...Array.from(actualMap.keys()),
+      ...Array.from(forecastMapA.keys()),
+      ...Array.from(forecastMapB.keys()),
+    ])
   ).sort();
 
   const data = allKeys.map((pk) => {
     const point: Record<string, number | string | null> = { date: getPeriodLabel(pk, period) };
     for (const dv of dimValues) {
-      point[`${dv}_actual`] = actualMap.get(pk)?.get(dv) ?? null;
-      point[`${dv}_forecast`] = forecastMap.get(pk)?.get(dv) ?? null;
+      point[`${dv}_actual`]    = actualMap.get(pk)?.get(dv) ?? null;
+      point[`${dv}_forecastA`] = forecastMapA.get(pk)?.get(dv) ?? null;
+      point[`${dv}_forecastB`] = forecastMapB.get(pk)?.get(dv) ?? null;
     }
     return point;
   });
