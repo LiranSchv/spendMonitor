@@ -129,6 +129,64 @@ export function getUniquePlatforms(rows: SpendRow[] | ForecastRow[]): Platform[]
   return Array.from(new Set(rows.map((r) => r.platform))).sort() as Platform[];
 }
 
+// ── Combined actual + forecast time series ────────────────────────────────────
+
+const TODAY = "2026-03-06";
+
+export function buildCombinedTimeSeries(
+  actualRows: SpendRow[],
+  forecastRows: ForecastRow[],
+  period: Period,
+  dimension: "all" | "channel" | "geo" | "game" | "platform"
+): { data: Record<string, number | string | null>[]; dimValues: string[]; todayLabel: string } {
+  const getDimVal = (r: SpendRow | ForecastRow) =>
+    dimension === "all" ? "total" : (r as unknown as Record<string, string>)[dimension];
+
+  const dimValues =
+    dimension === "all"
+      ? ["total"]
+      : Array.from(
+          new Set([
+            ...actualRows.map((r) => r[dimension as keyof SpendRow] as string),
+            ...forecastRows.map((r) => r[dimension as keyof ForecastRow] as string),
+          ])
+        ).sort();
+
+  // Aggregate actual by (periodKey, dimVal)
+  const actualMap = new Map<string, Map<string, number>>();
+  for (const row of actualRows) {
+    const pk = getPeriodKey(row.date, period);
+    const dv = getDimVal(row);
+    if (!actualMap.has(pk)) actualMap.set(pk, new Map());
+    actualMap.get(pk)!.set(dv, (actualMap.get(pk)!.get(dv) ?? 0) + row.actual_spend);
+  }
+
+  // Aggregate forecast by (periodKey, dimVal)
+  const forecastMap = new Map<string, Map<string, number>>();
+  for (const row of forecastRows) {
+    const pk = getPeriodKey(row.date, period);
+    const dv = getDimVal(row);
+    if (!forecastMap.has(pk)) forecastMap.set(pk, new Map());
+    forecastMap.get(pk)!.set(dv, (forecastMap.get(pk)!.get(dv) ?? 0) + row.forecast_spend);
+  }
+
+  const allKeys = Array.from(
+    new Set([...Array.from(actualMap.keys()), ...Array.from(forecastMap.keys())])
+  ).sort();
+
+  const data = allKeys.map((pk) => {
+    const point: Record<string, number | string | null> = { date: getPeriodLabel(pk, period) };
+    for (const dv of dimValues) {
+      point[`${dv}_actual`] = actualMap.get(pk)?.get(dv) ?? null;
+      point[`${dv}_forecast`] = forecastMap.get(pk)?.get(dv) ?? null;
+    }
+    return point;
+  });
+
+  const todayLabel = getPeriodLabel(getPeriodKey(TODAY, period), period);
+  return { data, dimValues, todayLabel };
+}
+
 // ── Time series for chart ─────────────────────────────────────────────────────
 
 export function buildTimeSeriesData(rows: SpendRow[], period: Period) {

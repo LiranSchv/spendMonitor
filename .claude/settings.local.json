@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export:*)",
+      "Bash(brew install:*)",
+      "Bash(git:*)",
+      "Bash(open:*)",
+      "Bash(pkill:*)"
+    ]
+  }
+}
