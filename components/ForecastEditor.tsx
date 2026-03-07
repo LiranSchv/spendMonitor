@@ -580,6 +580,7 @@ export default function ForecastEditor({ rows, forecastStart, forecastEnd, onEnd
                 type="date"
                 value={forecastEnd}
                 min={forecastStart}
+                max="2026-12-31"
                 onChange={(e) => onEndDateChange(e.target.value)}
                 className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
@@ -587,7 +588,10 @@ export default function ForecastEditor({ rows, forecastStart, forecastEnd, onEnd
             <div className="flex items-center gap-1.5">
               {quickRanges.map((r) => (
                 <Button key={r.label} variant="outline" size="sm" className="text-xs"
-                  onClick={() => onEndDateChange(addWeeksToDate(forecastStart, r.weeks))}>
+                  onClick={() => {
+                    const d = addWeeksToDate(forecastStart, r.weeks);
+                    onEndDateChange(d > "2026-12-31" ? "2026-12-31" : d);
+                  }}>
                   {r.label}
                 </Button>
               ))}

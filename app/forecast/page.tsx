@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSpendStore } from "@/lib/store";
 import ForecastEditor from "@/components/ForecastEditor";
-import { buildFutureForecastSkeleton, getNextMonday, addWeeksToDate } from "@/lib/utils";
+import { buildFutureForecastSkeleton, getNextMonday } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 
 const TODAY = "2026-03-02";
@@ -29,15 +29,21 @@ export default function ForecastPage() {
   const handleEndDateChange = (newEnd: string) => {
     if (!isLoaded || spendRows.length === 0 || newEnd === forecastEnd) return;
     setForecastEnd(newEnd);
-    if (newEnd < forecastEnd) {
-      // Shrinking: drop rows beyond new end, preserve edits on remaining
-      setCurrentForecastRows(currentForecastRows.filter((r) => r.date <= newEnd));
-    } else {
-      // Extending: keep existing edited rows, append skeleton for new weeks only
-      const firstNewWeek = addWeeksToDate(forecastEnd, 1);
-      const newRows = buildFutureForecastSkeleton(spendRows, firstNewWeek, newEnd);
-      setCurrentForecastRows([...currentForecastRows, ...newRows]);
-    }
+    // Build fresh skeleton for full new range, then restore any existing edits
+    const skeleton = buildFutureForecastSkeleton(spendRows, FORECAST_START, newEnd);
+    const editMap = new Map(
+      currentForecastRows.map((r) => [
+        `${r.date}|${r.channel}|${r.geo}|${r.game}|${r.platform}`,
+        r.forecast_spend,
+      ])
+    );
+    setCurrentForecastRows(
+      skeleton.map((r) => {
+        const key = `${r.date}|${r.channel}|${r.geo}|${r.game}|${r.platform}`;
+        const edited = editMap.get(key);
+        return edited !== undefined ? { ...r, forecast_spend: edited } : r;
+      })
+    );
   };
 
   if (!isLoaded) {
