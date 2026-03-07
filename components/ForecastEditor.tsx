@@ -134,7 +134,8 @@ function BulkEditPanel({ rows, forecastStart, forecastEnd }: {
   const [selPlatforms, setSelPlatforms] = useState<string[]>([]);
   const [startDate, setStartDate] = useState(forecastStart);
   const [endDate, setEndDate] = useState(forecastEnd);
-  const [action, setAction] = useState<"set" | "add_pct" | "add_flat">("add_pct");
+  const [direction, setDirection] = useState<"add" | "subtract">("add");
+  const [method, setMethod] = useState<"pct" | "flat">("pct");
   const [value, setValue] = useState<string>("10");
   const [applied, setApplied] = useState(false);
 
@@ -148,11 +149,13 @@ function BulkEditPanel({ rows, forecastStart, forecastEnd }: {
   }).length, [rows, selChannels, selGeos, selGames, selPlatforms, startDate, endDate]);
 
   const handleApply = () => {
+    const action: ForecastOperation["action"] = method === "pct" ? "add_pct" : "add_flat";
+    const numVal = (direction === "subtract" ? -1 : 1) * Math.abs(Number(value));
     const op: ForecastOperation = {
-      action, value: Number(value),
+      action, value: numVal,
       channels: selChannels, geos: selGeos, games: selGames, platforms: selPlatforms,
       startDate, endDate,
-      summary: `${action} ${value} to matching rows`,
+      summary: `${direction} ${value}${method === "pct" ? "%" : "$"} to matching rows`,
     };
     applyBulkOperation(op);
     setApplied(true);
@@ -187,24 +190,25 @@ function BulkEditPanel({ rows, forecastStart, forecastEnd }: {
               onChange={(e) => setEndDate(e.target.value)}
               className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
           </div>
-
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Action</label>
-            <Select value={action} onChange={(e) => setAction(e.target.value as typeof action)} className="w-32">
-              <option value="add_pct">Add %</option>
-              <option value="add_flat">Add $</option>
-              <option value="set">Set to $</option>
+            <Select value={direction} onChange={(e) => setDirection(e.target.value as typeof direction)} className="w-28">
+              <option value="add">Add</option>
+              <option value="subtract">Subtract</option>
             </Select>
           </div>
-
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              {action === "add_pct" ? "Percent" : "Amount"}
-            </label>
-            <input type="number" value={value} onChange={(e) => setValue(e.target.value)} step={action === "add_pct" ? 1 : 1000}
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Method</label>
+            <Select value={method} onChange={(e) => setMethod(e.target.value as typeof method)} className="w-20">
+              <option value="pct">%</option>
+              <option value="flat">$</option>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Value</label>
+            <input type="number" value={value} onChange={(e) => setValue(e.target.value)} min={0} step={method === "pct" ? 1 : 1000}
               className="w-24 h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
           </div>
-
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider opacity-0">Go</label>
             <Button onClick={handleApply} disabled={affected === 0} className={cn("gap-1.5", applied && "bg-green-600 hover:bg-green-600")}>
@@ -358,7 +362,7 @@ function NLPPanel({ rows, forecastStart, forecastEnd }: {
 
 // ── Forecast Table ─────────────────────────────────────────────────────────────
 function ForecastTable({ rows }: { rows: ForecastRow[] }) {
-  const { updateForecastCell } = useSpendStore();
+  const { spendRows, updateForecastCell } = useSpendStore();
   const [groupBy, setGroupBy] = useState<"channel" | "geo" | "game" | "platform">("channel");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -372,6 +376,24 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
     return map;
   }, [rows, groupBy]);
 
+  // Last 4 weeks actual totals
+  const { last4GroupMap, last4ComboMap, grandLast4 } = useMemo(() => {
+    const sortedDates = Array.from(new Set(spendRows.map((r) => r.date))).sort();
+    const last4Dates = new Set(sortedDates.slice(-4));
+    const groupMap = new Map<string, number>();
+    const comboMap = new Map<string, number>();
+    let grand = 0;
+    for (const row of spendRows) {
+      if (!last4Dates.has(row.date)) continue;
+      const gk = row[groupBy] as string;
+      groupMap.set(gk, (groupMap.get(gk) ?? 0) + row.actual_spend);
+      const ck = `${row.channel}|${row.geo}|${row.game}|${row.platform}`;
+      comboMap.set(ck, (comboMap.get(ck) ?? 0) + row.actual_spend);
+      grand += row.actual_spend;
+    }
+    return { last4GroupMap: groupMap, last4ComboMap: comboMap, grandLast4: grand };
+  }, [spendRows, groupBy]);
+
   const toggle = (k: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -381,14 +403,15 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
   };
 
   const grandTotal = rows.reduce((s, r) => s + r.forecast_spend, 0);
+  const grandDiff = grandTotal - grandLast4;
+
+  const diffClass = (d: number) => d >= 0 ? "text-green-400" : "text-red-400";
+  const diffFmt = (d: number) => `${d >= 0 ? "+" : ""}${formatCurrency(d)}`;
 
   return (
     <Card className="border-border bg-card">
-      <CardHeader className="flex flex-row items-center justify-between pb-4">
-        <CardTitle className="text-base font-semibold text-foreground">
-          Edit Forecast
-          <span className="text-sm font-normal text-muted-foreground ml-2">Total: {formatCurrency(grandTotal)}</span>
-        </CardTitle>
+      <CardHeader className="flex flex-row items-center justify-between pb-3">
+        <CardTitle className="text-base font-semibold text-foreground">Edit Forecast</CardTitle>
         <Select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="w-32">
           <option value="channel">By Channel</option>
           <option value="geo">By GEO</option>
@@ -401,37 +424,52 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/30">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">{groupBy}</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Channel / GEO / Game / Platform / Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Forecast Spend / wk</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">{groupBy} / Detail</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Forecast $</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Last 4 wks $</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">vs 4 wks</th>
               </tr>
             </thead>
             <tbody>
+              {/* Grand total row */}
+              <tr className="border-b-2 border-primary/30 bg-primary/5">
+                <td className="px-4 py-3 font-bold text-foreground">Total</td>
+                <td className="px-4 py-3 text-right font-mono font-bold text-foreground">{formatCurrency(grandTotal)}</td>
+                <td className="px-4 py-3 text-right font-mono text-muted-foreground">{formatCurrency(grandLast4)}</td>
+                <td className={`px-4 py-3 text-right font-mono font-semibold ${diffClass(grandDiff)}`}>{diffFmt(grandDiff)}</td>
+              </tr>
+
               {Array.from(grouped.entries()).map(([groupKey, groupRows]) => {
                 const isExpanded = expanded.has(groupKey);
                 const total = groupRows.reduce((s, r) => s + r.forecast_spend, 0);
+                const last4 = last4GroupMap.get(groupKey) ?? 0;
+                const diff = total - last4;
                 return (
                   <Fragment key={groupKey}>
                     <tr className="border-b border-border bg-muted/10 cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => toggle(groupKey)}>
-                      <td className="px-4 py-2.5 font-semibold text-foreground" colSpan={2}>
+                      <td className="px-4 py-2.5 font-semibold text-foreground">
                         <div className="flex items-center gap-2">
                           {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
                           {groupKey}
                           <span className="text-xs font-normal text-muted-foreground">({groupRows.length} rows)</span>
                         </div>
                       </td>
-                      <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{formatCurrency(total)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono font-semibold text-foreground">{formatCurrency(total)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{formatCurrency(last4)}</td>
+                      <td className={`px-4 py-2.5 text-right font-mono font-semibold ${diffClass(diff)}`}>{diffFmt(diff)}</td>
                     </tr>
                     {isExpanded && groupRows.map((row) => {
                       const key = `${row.date}|${row.channel}|${row.geo}|${row.game}|${row.platform}`;
+                      const comboKey = `${row.channel}|${row.geo}|${row.game}|${row.platform}`;
+                      const comboLast4 = last4ComboMap.get(comboKey) ?? 0;
+                      const comboDiff = row.forecast_spend - comboLast4;
                       return (
                         <tr key={key} className="border-b border-border/50 hover:bg-muted/10 transition-colors">
-                          <td className="px-4 py-2 pl-10 text-xs text-muted-foreground">{row[groupBy]}</td>
-                          <td className="px-4 py-2 text-xs text-muted-foreground">
+                          <td className="px-4 py-2 pl-10 text-xs text-muted-foreground">
                             {[row.channel, row.geo, row.game, row.platform, row.date].join(" · ")}
                           </td>
-                          <td className="px-4 py-2">
-                            <div className="flex items-center gap-1">
+                          <td className="px-4 py-2 text-right">
+                            <div className="flex items-center justify-end gap-1">
                               <span className="text-xs text-muted-foreground">$</span>
                               <input
                                 type="number"
@@ -442,6 +480,8 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
                               />
                             </div>
                           </td>
+                          <td className="px-4 py-2 text-right font-mono text-xs text-muted-foreground">{formatCurrency(comboLast4)}</td>
+                          <td className={`px-4 py-2 text-right font-mono text-xs ${diffClass(comboDiff)}`}>{diffFmt(comboDiff)}</td>
                         </tr>
                       );
                     })}
