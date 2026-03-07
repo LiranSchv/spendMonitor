@@ -264,10 +264,10 @@ export function buildFutureForecastSkeleton(
     const key = `${row.channel}|${row.geo}|${row.game}|${row.platform}`;
     avgMap.set(key, (avgMap.get(key) ?? 0) + row.actual_spend);
   }
-  // Keep as total of last 4 weeks (not average) so the default forecast
-  // matches the last-4-wks reference column in the forecast table.
+  // Weekly average — default forecast per row = last4_total / 4.
+  // At the group level this means: group_forecast = weeks × (last4/4) = RR extrapolation.
   for (const [key, total] of avgMap.entries()) {
-    avgMap.set(key, Math.round(total));
+    avgMap.set(key, Math.round(total / last4Dates.length));
   }
 
   // Generate weeks in range

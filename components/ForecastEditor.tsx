@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, Fragment } from "react";
+import { useState, useMemo, useCallback, useRef, Fragment } from "react";
 import { ForecastRow, ForecastOperation, Game, Platform } from "@/lib/types";
 import { useSpendStore } from "@/lib/store";
 import { formatCurrency, getUniqueChannels, getUniqueGeos, getUniqueGames, getUniquePlatforms, addWeeksToDate } from "@/lib/utils";
@@ -360,6 +360,18 @@ function NLPPanel({ rows, forecastStart, forecastEnd }: {
   );
 }
 
+// ── Info Tooltip ──────────────────────────────────────────────────────────────
+function InfoTooltip({ text }: { text: string }) {
+  return (
+    <span className="relative group inline-flex items-center cursor-help ml-1">
+      <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted-foreground/50 text-muted-foreground text-[9px] font-bold leading-none select-none">i</span>
+      <span className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 px-2 py-1.5 rounded bg-popover border border-border text-xs text-foreground whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none shadow-lg">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 // ── Forecast Table ─────────────────────────────────────────────────────────────
 function ForecastTable({ rows }: { rows: ForecastRow[] }) {
   const { spendRows, updateForecastCell, setCurrentForecastRows } = useSpendStore();
@@ -402,16 +414,35 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
     });
   };
 
+  // Number of forecast weeks in this period (each unique date = one week)
+  const weeksInPeriod = useMemo(
+    () => new Set(rows.map((r) => r.date)).size,
+    [rows]
+  );
+
+  // RR Extrapolation: scale last-4-wk total to the forecast horizon
+  // formula: (last4 / 4) × weeksInPeriod  — same scale as the forecast total
+  const rrGroup = useCallback(
+    (last4: number) => Math.round((last4 / 4) * weeksInPeriod),
+    [weeksInPeriod]
+  );
+  const rrCombo = useCallback(
+    (last4: number) => Math.round(last4 / 4),
+    []
+  );
+
   const grandTotal = rows.reduce((s, r) => s + r.forecast_spend, 0);
-  const grandDiff = grandTotal - grandLast4;
+  const grandRR = rrGroup(grandLast4);
+  const grandDiff = grandTotal - grandRR;
 
   const diffClass = (d: number) => d >= 0 ? "text-green-400" : "text-red-400";
   const diffFmt = (d: number) => `${d >= 0 ? "+" : ""}${formatCurrency(d)}`;
 
+  // Reset: restore each row to last4_combo / 4 (weekly average = matches RR baseline)
   const handleReset = () => {
     const reset = rows.map((row) => {
       const ck = `${row.channel}|${row.geo}|${row.game}|${row.platform}`;
-      return { ...row, forecast_spend: last4ComboMap.get(ck) ?? 0 };
+      return { ...row, forecast_spend: Math.round((last4ComboMap.get(ck) ?? 0) / 4) };
     });
     setCurrentForecastRows(reset);
   };
@@ -427,7 +458,7 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
             onClick={handleReset}
             className="border-red-800 text-red-400 hover:bg-red-950/40 hover:text-red-300"
           >
-            Reset to 4 wks
+            Reset to actual RR
           </Button>
           <Select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="w-32">
             <option value="channel">By Channel</option>
@@ -443,16 +474,21 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">{groupBy} / Detail</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Last 4 wks $</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  <div className="flex items-center justify-end gap-1">
+                    RR Extrapolation
+                    <InfoTooltip text={`Based on last 4 weeks × ${weeksInPeriod} forecast weeks / 4`} />
+                  </div>
+                </th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Forecast $</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">vs 4 wks</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">vs RR</th>
               </tr>
             </thead>
             <tbody>
               {/* Grand total row */}
               <tr className="border-b-2 border-primary/30 bg-primary/5">
                 <td className="px-4 py-3 font-bold text-foreground">Total</td>
-                <td className="px-4 py-3 text-right font-mono text-muted-foreground">{formatCurrency(grandLast4)}</td>
+                <td className="px-4 py-3 text-right font-mono text-muted-foreground">{formatCurrency(grandRR)}</td>
                 <td className="px-4 py-3 text-right font-mono font-bold text-foreground">{formatCurrency(grandTotal)}</td>
                 <td className={`px-4 py-3 text-right font-mono font-semibold ${diffClass(grandDiff)}`}>{diffFmt(grandDiff)}</td>
               </tr>
@@ -460,8 +496,8 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
               {Array.from(grouped.entries()).map(([groupKey, groupRows]) => {
                 const isExpanded = expanded.has(groupKey);
                 const total = groupRows.reduce((s, r) => s + r.forecast_spend, 0);
-                const last4 = last4GroupMap.get(groupKey) ?? 0;
-                const diff = total - last4;
+                const rr = rrGroup(last4GroupMap.get(groupKey) ?? 0);
+                const diff = total - rr;
                 return (
                   <Fragment key={groupKey}>
                     <tr className="border-b border-border bg-muted/10 cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => toggle(groupKey)}>
@@ -472,21 +508,21 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
                           <span className="text-xs font-normal text-muted-foreground">({groupRows.length} rows)</span>
                         </div>
                       </td>
-                      <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{formatCurrency(last4)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{formatCurrency(rr)}</td>
                       <td className="px-4 py-2.5 text-right font-mono font-semibold text-foreground">{formatCurrency(total)}</td>
                       <td className={`px-4 py-2.5 text-right font-mono font-semibold ${diffClass(diff)}`}>{diffFmt(diff)}</td>
                     </tr>
                     {isExpanded && groupRows.map((row) => {
                       const key = `${row.date}|${row.channel}|${row.geo}|${row.game}|${row.platform}`;
                       const comboKey = `${row.channel}|${row.geo}|${row.game}|${row.platform}`;
-                      const comboLast4 = last4ComboMap.get(comboKey) ?? 0;
-                      const comboDiff = row.forecast_spend - comboLast4;
+                      const comboRR = rrCombo(last4ComboMap.get(comboKey) ?? 0);
+                      const comboDiff = row.forecast_spend - comboRR;
                       return (
                         <tr key={key} className="border-b border-border/50 hover:bg-muted/10 transition-colors">
                           <td className="px-4 py-2 pl-10 text-xs text-muted-foreground">
                             {[row.channel, row.geo, row.game, row.platform, row.date].join(" · ")}
                           </td>
-                          <td className="px-4 py-2 text-right font-mono text-xs text-muted-foreground">{formatCurrency(comboLast4)}</td>
+                          <td className="px-4 py-2 text-right font-mono text-xs text-muted-foreground">{formatCurrency(comboRR)}</td>
                           <td className="px-4 py-2 text-right">
                             <div className="flex items-center justify-end gap-1">
                               <span className="text-xs text-muted-foreground">$</span>
