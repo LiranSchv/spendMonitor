@@ -27,11 +27,17 @@ export default function ForecastPage() {
   }, [isLoaded]);
 
   const handleEndDateChange = (newEnd: string) => {
+    if (!isLoaded || spendRows.length === 0 || newEnd === forecastEnd) return;
     setForecastEnd(newEnd);
-    if (!isLoaded || spendRows.length === 0) return;
-    // Rebuild skeleton (resets edits — this is intentional for range changes)
-    const skeleton = buildFutureForecastSkeleton(spendRows, FORECAST_START, newEnd);
-    setCurrentForecastRows(skeleton);
+    if (newEnd < forecastEnd) {
+      // Shrinking: drop rows beyond new end, preserve edits on remaining
+      setCurrentForecastRows(currentForecastRows.filter((r) => r.date <= newEnd));
+    } else {
+      // Extending: keep existing edited rows, append skeleton for new weeks only
+      const firstNewWeek = addWeeksToDate(forecastEnd, 1);
+      const newRows = buildFutureForecastSkeleton(spendRows, firstNewWeek, newEnd);
+      setCurrentForecastRows([...currentForecastRows, ...newRows]);
+    }
   };
 
   if (!isLoaded) {
