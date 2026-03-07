@@ -44,6 +44,7 @@ function VersionPanel({ rows }: { rows: ForecastRow[] }) {
   const { versions, activeVersionId, saveVersion, loadVersion, deleteVersion } = useSpendStore();
   const [saveName, setSaveName] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const handleSave = () => {
     if (!saveName.trim()) return;
@@ -69,7 +70,12 @@ function VersionPanel({ rows }: { rows: ForecastRow[] }) {
                 {versions.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </Select>
             )}
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowForm((p) => !p)}>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {
+              const now = new Date();
+              const pad = (n: number) => String(n).padStart(2, "0");
+              setNamePlaceholder(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`);
+              setShowForm((p) => !p);
+            }}>
               <Save className="h-3.5 w-3.5" />Save version
             </Button>
           </div>
@@ -79,7 +85,7 @@ function VersionPanel({ rows }: { rows: ForecastRow[] }) {
           <div className="flex items-center gap-2 border-t border-border pt-3">
             <input
               type="text" value={saveName} onChange={(e) => setSaveName(e.target.value)}
-              placeholder="e.g. Q2 Aggressive"
+              placeholder={namePlaceholder}
               onKeyDown={(e) => e.key === "Enter" && handleSave()}
               autoFocus
               className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
