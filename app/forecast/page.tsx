@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSpendStore } from "@/lib/store";
 import ForecastEditor from "@/components/ForecastEditor";
-import { buildFutureForecastSkeleton, getNextMonday } from "@/lib/utils";
+import { buildFutureForecastSkeleton, getNextMonday, addWeeksToDate } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 
 const TODAY = "2026-03-02";
