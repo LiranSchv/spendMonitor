@@ -134,7 +134,7 @@ export default function SpendChart({ rows }: Props) {
   const [period, setPeriod] = useState<Period>("month");
   const [dimension, setDimension] = useState<DimOption>("all");
   const [versionAId, setVersionAId] = useState<string>(BASELINE);
-  const [versionBId, setVersionBId] = useState<string>(BASELINE);
+  const [versionBId, setVersionBId] = useState<string>("none");
   const [error, setError] = useState<string | null>(null);
 
   const { versions, filters } = useSpendStore();
@@ -148,12 +148,14 @@ export default function SpendChart({ rows }: Props) {
     }
   }, [versions]);
 
-  // Comparing = both slots have a real version (neither is Baseline)
-  const isComparing = versionAId !== BASELINE && versionBId !== BASELINE;
-  const effectiveDimension = isComparing ? "all" : dimension;
+  // Comparing = both slots have a real (non-baseline, non-none) version
+  const isComparing = versionAId !== BASELINE && versionBId !== BASELINE && versionBId !== "none";
+  // Breakdown only when A has a real version and B is explicitly None
+  const showBreakdown = versionAId !== BASELINE && versionBId === "none";
+  const effectiveDimension = showBreakdown ? dimension : "all";
 
   const getForecastRows = useCallback((vId: string): ForecastRow[] => {
-    if (vId === BASELINE) return [];
+    if (vId === BASELINE || vId === "none") return [];
     return versions.find((v) => v.id === vId)?.rows ?? [];
   }, [versions]);
 
@@ -179,7 +181,7 @@ export default function SpendChart({ rows }: Props) {
   };
 
   const handleVersionAChange = (val: string) => {
-    if (val === BASELINE && versionBId === BASELINE) {
+    if (val === versionBId && val !== "none") {
       setError("You can only compare 2 different versions");
       return;
     }
@@ -188,7 +190,7 @@ export default function SpendChart({ rows }: Props) {
   };
 
   const handleVersionBChange = (val: string) => {
-    if (val === BASELINE && versionAId === BASELINE) {
+    if (val !== "none" && val === versionAId) {
       setError("You can only compare 2 different versions");
       return;
     }
@@ -221,11 +223,12 @@ export default function SpendChart({ rows }: Props) {
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Version B:</span>
               <Select value={versionBId} onChange={(e) => handleVersionBChange(e.target.value)} className="w-32">
+                <option value="none">None</option>
                 <option value={BASELINE}>Baseline</option>
                 {versionOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select>
             </div>
-            {!isComparing && (
+            {showBreakdown && (
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-muted-foreground whitespace-nowrap">Breakdown by:</span>
                 <Select value={dimension} onChange={(e) => setDimension(e.target.value as DimOption)} className="w-32">
