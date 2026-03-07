@@ -563,7 +563,7 @@ export default function ForecastEditor({ rows, forecastStart, forecastEnd, onEnd
   const quickRanges = [
     { label: "3 months", weeks: 13 },
     { label: "6 months", weeks: 26 },
-    { label: "1 year", weeks: 52 },
+    { label: "End of 2026", date: "2026-12-31" },
   ];
 
   return (
@@ -589,7 +589,7 @@ export default function ForecastEditor({ rows, forecastStart, forecastEnd, onEnd
               {quickRanges.map((r) => (
                 <Button key={r.label} variant="outline" size="sm" className="text-xs"
                   onClick={() => {
-                    const d = addWeeksToDate(forecastStart, r.weeks);
+                    const d = "date" in r ? r.date : addWeeksToDate(forecastStart, r.weeks);
                     onEndDateChange(d > "2026-12-31" ? "2026-12-31" : d);
                   }}>
                   {r.label}

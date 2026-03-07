@@ -58,7 +58,7 @@ export const useSpendStore = create<SpendStore>()(
       isLoaded: false,
 
       loadSpendRows: async () => {
-        if (get().isLoaded) return;
+        if (get().isLoaded && get().spendRows.length > 0) return;
         const response = await fetch("/api/spend");
         if (!response.ok) throw new Error("Failed to load spend data");
         const rows = await response.json();
