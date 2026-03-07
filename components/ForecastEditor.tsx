@@ -73,7 +73,9 @@ function VersionPanel({ rows }: { rows: ForecastRow[] }) {
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {
               const now = new Date();
               const pad = (n: number) => String(n).padStart(2, "0");
-              setNamePlaceholder(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`);
+              const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+              setNamePlaceholder(ts);
+              setSaveName(ts);
               setShowForm((p) => !p);
             }}>
               <Save className="h-3.5 w-3.5" />Save version
