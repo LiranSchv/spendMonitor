@@ -264,9 +264,10 @@ export function buildFutureForecastSkeleton(
     const key = `${row.channel}|${row.geo}|${row.game}|${row.platform}`;
     avgMap.set(key, (avgMap.get(key) ?? 0) + row.actual_spend);
   }
-  // Divide by count of matching dates per combo
+  // Keep as total of last 4 weeks (not average) so the default forecast
+  // matches the last-4-wks reference column in the forecast table.
   for (const [key, total] of avgMap.entries()) {
-    avgMap.set(key, Math.round(total / last4Dates.length));
+    avgMap.set(key, Math.round(total));
   }
 
   // Generate weeks in range

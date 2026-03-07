@@ -362,7 +362,7 @@ function NLPPanel({ rows, forecastStart, forecastEnd }: {
 
 // ── Forecast Table ─────────────────────────────────────────────────────────────
 function ForecastTable({ rows }: { rows: ForecastRow[] }) {
-  const { spendRows, updateForecastCell } = useSpendStore();
+  const { spendRows, updateForecastCell, setCurrentForecastRows } = useSpendStore();
   const [groupBy, setGroupBy] = useState<"channel" | "geo" | "game" | "platform">("channel");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -408,16 +408,34 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
   const diffClass = (d: number) => d >= 0 ? "text-green-400" : "text-red-400";
   const diffFmt = (d: number) => `${d >= 0 ? "+" : ""}${formatCurrency(d)}`;
 
+  const handleReset = () => {
+    const reset = rows.map((row) => {
+      const ck = `${row.channel}|${row.geo}|${row.game}|${row.platform}`;
+      return { ...row, forecast_spend: last4ComboMap.get(ck) ?? 0 };
+    });
+    setCurrentForecastRows(reset);
+  };
+
   return (
     <Card className="border-border bg-card">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <CardTitle className="text-base font-semibold text-foreground">Edit Forecast</CardTitle>
-        <Select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="w-32">
-          <option value="channel">By Channel</option>
-          <option value="geo">By GEO</option>
-          <option value="game">By Game</option>
-          <option value="platform">By Platform</option>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReset}
+            className="border-red-800 text-red-400 hover:bg-red-950/40 hover:text-red-300"
+          >
+            Reset to 4 wks
+          </Button>
+          <Select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="w-32">
+            <option value="channel">By Channel</option>
+            <option value="geo">By GEO</option>
+            <option value="game">By Game</option>
+            <option value="platform">By Platform</option>
+          </Select>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
@@ -425,8 +443,8 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">{groupBy} / Detail</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Forecast $</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Last 4 wks $</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Forecast $</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">vs 4 wks</th>
               </tr>
             </thead>
@@ -434,8 +452,8 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
               {/* Grand total row */}
               <tr className="border-b-2 border-primary/30 bg-primary/5">
                 <td className="px-4 py-3 font-bold text-foreground">Total</td>
-                <td className="px-4 py-3 text-right font-mono font-bold text-foreground">{formatCurrency(grandTotal)}</td>
                 <td className="px-4 py-3 text-right font-mono text-muted-foreground">{formatCurrency(grandLast4)}</td>
+                <td className="px-4 py-3 text-right font-mono font-bold text-foreground">{formatCurrency(grandTotal)}</td>
                 <td className={`px-4 py-3 text-right font-mono font-semibold ${diffClass(grandDiff)}`}>{diffFmt(grandDiff)}</td>
               </tr>
 
@@ -454,8 +472,8 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
                           <span className="text-xs font-normal text-muted-foreground">({groupRows.length} rows)</span>
                         </div>
                       </td>
-                      <td className="px-4 py-2.5 text-right font-mono font-semibold text-foreground">{formatCurrency(total)}</td>
                       <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{formatCurrency(last4)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono font-semibold text-foreground">{formatCurrency(total)}</td>
                       <td className={`px-4 py-2.5 text-right font-mono font-semibold ${diffClass(diff)}`}>{diffFmt(diff)}</td>
                     </tr>
                     {isExpanded && groupRows.map((row) => {
@@ -468,6 +486,7 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
                           <td className="px-4 py-2 pl-10 text-xs text-muted-foreground">
                             {[row.channel, row.geo, row.game, row.platform, row.date].join(" · ")}
                           </td>
+                          <td className="px-4 py-2 text-right font-mono text-xs text-muted-foreground">{formatCurrency(comboLast4)}</td>
                           <td className="px-4 py-2 text-right">
                             <div className="flex items-center justify-end gap-1">
                               <span className="text-xs text-muted-foreground">$</span>
@@ -480,7 +499,6 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
                               />
                             </div>
                           </td>
-                          <td className="px-4 py-2 text-right font-mono text-xs text-muted-foreground">{formatCurrency(comboLast4)}</td>
                           <td className={`px-4 py-2 text-right font-mono text-xs ${diffClass(comboDiff)}`}>{diffFmt(comboDiff)}</td>
                         </tr>
                       );
