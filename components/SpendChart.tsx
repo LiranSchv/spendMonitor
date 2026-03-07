@@ -3,7 +3,6 @@
 import { SpendRow, ForecastRow, Period } from "@/lib/types";
 import {
   buildCombinedTimeSeries,
-  buildFutureForecastSkeleton,
   filterForecastRows,
   formatCurrency,
 } from "@/lib/utils";
@@ -16,8 +15,12 @@ import { Select } from "@/components/ui/select";
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useSpendStore } from "@/lib/store";
 
-const FORECAST_FROM = "2026-03-02";
-const FORECAST_TO   = "2026-12-28";
+// Colors used when comparing two versions (fixed, not per-dimension)
+const CMP_ACTUAL    = "#64748b";
+const CMP_VERSION_A = "#8b5cf6";
+const CMP_VERSION_B = "#06b6d4";
+
+const BASELINE = "baseline"; // sentinel for "no forecast selected"
 
 type Props = { rows: SpendRow[] };
 type DimOption = "all" | "channel" | "geo" | "game" | "platform";
@@ -51,14 +54,46 @@ function CustomTooltip({ active, payload, label }: {
   );
 }
 
+function Swatch({ color, dash }: { color: string; dash?: string }) {
+  return (
+    <svg width="20" height="10">
+      <line x1="0" y1="5" x2="20" y2="5" stroke={color} strokeWidth="2" strokeDasharray={dash} />
+    </svg>
+  );
+}
+
 function CustomLegend({
-  dimValues, palette, labelA, labelB,
+  dimValues, palette, labelA, labelB, isComparing,
 }: {
   dimValues: string[];
   palette: string[];
   labelA: string | null;
   labelB: string | null;
+  isComparing: boolean;
 }) {
+  if (isComparing) {
+    return (
+      <div className="flex flex-wrap gap-x-5 gap-y-1.5 justify-center mt-2">
+        <div className="flex items-center gap-1">
+          <Swatch color={CMP_ACTUAL} />
+          <span className="text-xs text-muted-foreground">Actual</span>
+        </div>
+        {labelA && (
+          <div className="flex items-center gap-1">
+            <Swatch color={CMP_VERSION_A} dash="6 3" />
+            <span className="text-xs text-muted-foreground">{labelA}</span>
+          </div>
+        )}
+        {labelB && (
+          <div className="flex items-center gap-1">
+            <Swatch color={CMP_VERSION_B} dash="2 3" />
+            <span className="text-xs text-muted-foreground">{labelB}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1.5 justify-center mt-2">
       {dimValues.map((dv, i) => {
@@ -66,37 +101,27 @@ function CustomLegend({
         const label = dv === "total" ? "" : dv;
         return (
           <div key={dv} className="flex items-center gap-1.5">
-            <svg width="20" height="10">
-              <line x1="0" y1="5" x2="20" y2="5" stroke={color} strokeWidth="2" />
-            </svg>
-            {labelA && (
-              <svg width="20" height="10">
-                <line x1="0" y1="5" x2="20" y2="5" stroke={color} strokeWidth="2" strokeDasharray="6 3" />
-              </svg>
-            )}
-            {labelB && (
-              <svg width="20" height="10">
-                <line x1="0" y1="5" x2="20" y2="5" stroke={color} strokeWidth="2" strokeDasharray="2 3" />
-              </svg>
-            )}
+            <Swatch color={color} />
+            {labelA && <Swatch color={color} dash="6 3" />}
+            {labelB && <Swatch color={color} dash="2 3" />}
             {label && <span className="text-xs text-muted-foreground">{label}</span>}
           </div>
         );
       })}
       <div className="flex items-center gap-3 border-l border-border pl-3 ml-1">
         <div className="flex items-center gap-1">
-          <svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#9ca3af" strokeWidth="2" /></svg>
+          <Swatch color="#9ca3af" />
           <span className="text-xs text-muted-foreground">Actual</span>
         </div>
         {labelA && (
           <div className="flex items-center gap-1">
-            <svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#9ca3af" strokeWidth="2" strokeDasharray="6 3" /></svg>
+            <Swatch color="#9ca3af" dash="6 3" />
             <span className="text-xs text-muted-foreground">{labelA}</span>
           </div>
         )}
         {labelB && (
           <div className="flex items-center gap-1">
-            <svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#9ca3af" strokeWidth="2" strokeDasharray="2 3" /></svg>
+            <Swatch color="#9ca3af" dash="2 3" />
             <span className="text-xs text-muted-foreground">{labelB}</span>
           </div>
         )}
@@ -108,10 +133,11 @@ function CustomLegend({
 export default function SpendChart({ rows }: Props) {
   const [period, setPeriod] = useState<Period>("month");
   const [dimension, setDimension] = useState<DimOption>("all");
-  const [versionAId, setVersionAId] = useState<string>("baseline");
-  const [versionBId, setVersionBId] = useState<string>("none");
+  const [versionAId, setVersionAId] = useState<string>(BASELINE);
+  const [versionBId, setVersionBId] = useState<string>(BASELINE);
+  const [error, setError] = useState<string | null>(null);
 
-  const { spendRows, versions, filters } = useSpendStore();
+  const { versions, filters } = useSpendStore();
 
   // Default versionA to latest saved version once versions are available
   const didInit = useRef(false);
@@ -122,16 +148,14 @@ export default function SpendChart({ rows }: Props) {
     }
   }, [versions]);
 
-  const baselineForecast = useMemo(() => {
-    if (spendRows.length === 0) return [] as ForecastRow[];
-    return buildFutureForecastSkeleton(spendRows, FORECAST_FROM, FORECAST_TO);
-  }, [spendRows]);
+  // Comparing = both slots have a real version (neither is Baseline)
+  const isComparing = versionAId !== BASELINE && versionBId !== BASELINE;
+  const effectiveDimension = isComparing ? "all" : dimension;
 
   const getForecastRows = useCallback((vId: string): ForecastRow[] => {
-    if (vId === "none") return [];
-    if (vId === "baseline") return baselineForecast;
+    if (vId === BASELINE) return [];
     return versions.find((v) => v.id === vId)?.rows ?? [];
-  }, [baselineForecast, versions]);
+  }, [versions]);
 
   const forecastRowsA = useMemo(
     () => filterForecastRows(getForecastRows(versionAId), filters),
@@ -143,26 +167,32 @@ export default function SpendChart({ rows }: Props) {
   );
 
   const { data, dimValues, todayLabel } = useMemo(
-    () => buildCombinedTimeSeries(rows, forecastRowsA, forecastRowsB, period, dimension),
-    [rows, forecastRowsA, forecastRowsB, period, dimension]
+    () => buildCombinedTimeSeries(rows, forecastRowsA, forecastRowsB, period, effectiveDimension),
+    [rows, forecastRowsA, forecastRowsB, period, effectiveDimension]
   );
 
-  const versionOptions = [
-    { value: "baseline", label: "Baseline" },
-    ...versions.map((v) => ({ value: v.id, label: v.name })),
-  ];
+  const versionOptions = versions.map((v) => ({ value: v.id, label: v.name }));
 
   const getLabel = (vId: string) => {
-    if (vId === "none") return null;
+    if (vId === BASELINE) return null;
     return versionOptions.find((o) => o.value === vId)?.label ?? null;
   };
 
   const handleVersionAChange = (val: string) => {
-    if (val === "none" && versionBId === "none") return;
+    if (val === BASELINE && versionBId === BASELINE) {
+      setError("You can only compare 2 different versions");
+      return;
+    }
+    setError(null);
     setVersionAId(val);
   };
+
   const handleVersionBChange = (val: string) => {
-    if (val === "none" && versionAId === "none") return;
+    if (val === BASELINE && versionAId === BASELINE) {
+      setError("You can only compare 2 different versions");
+      return;
+    }
+    setError(null);
     setVersionBId(val);
   };
 
@@ -174,42 +204,50 @@ export default function SpendChart({ rows }: Props) {
 
   return (
     <Card className="border-border bg-card">
-      <CardHeader className="flex flex-row items-center justify-between pb-4 flex-wrap gap-2">
-        <CardTitle className="text-base font-semibold text-foreground">
-          Spend Trend
-          <span className="text-xs font-normal text-muted-foreground ml-2">— solid: actual · dashed: forecast</span>
-        </CardTitle>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
-          {/* Version selectors */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-muted-foreground whitespace-nowrap">Version A:</span>
-            <Select value={versionAId} onChange={(e) => handleVersionAChange(e.target.value)} className="w-32">
-              <option value="none">None</option>
-              {versionOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      <CardHeader className="pb-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <CardTitle className="text-base font-semibold text-foreground">
+            Spend Trend
+            <span className="text-xs font-normal text-muted-foreground ml-2">— solid: actual · dashed: forecast</span>
+          </CardTitle>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Version A:</span>
+              <Select value={versionAId} onChange={(e) => handleVersionAChange(e.target.value)} className="w-32">
+                <option value={BASELINE}>Baseline</option>
+                {versionOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </Select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Version B:</span>
+              <Select value={versionBId} onChange={(e) => handleVersionBChange(e.target.value)} className="w-32">
+                <option value={BASELINE}>Baseline</option>
+                {versionOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </Select>
+            </div>
+            {!isComparing && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-muted-foreground whitespace-nowrap">Breakdown by:</span>
+                <Select value={dimension} onChange={(e) => setDimension(e.target.value as DimOption)} className="w-32">
+                  <option value="all">All</option>
+                  <option value="channel">Channel</option>
+                  <option value="geo">GEO</option>
+                  <option value="game">Game</option>
+                  <option value="platform">Platform</option>
+                </Select>
+              </div>
+            )}
+            <Select value={period} onChange={(e) => setPeriod(e.target.value as Period)} className="w-28">
+              <option value="week">Weekly</option>
+              <option value="month">Monthly</option>
+              <option value="quarter">Quarterly</option>
+              <option value="year">Yearly</option>
             </Select>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-muted-foreground whitespace-nowrap">Version B:</span>
-            <Select value={versionBId} onChange={(e) => handleVersionBChange(e.target.value)} className="w-32">
-              <option value="none">None</option>
-              {versionOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-          </div>
-          {/* Dimension / period */}
-          <Select value={dimension} onChange={(e) => setDimension(e.target.value as DimOption)} className="w-32">
-            <option value="all">All</option>
-            <option value="channel">By Channel</option>
-            <option value="geo">By GEO</option>
-            <option value="game">By Game</option>
-            <option value="platform">By Platform</option>
-          </Select>
-          <Select value={period} onChange={(e) => setPeriod(e.target.value as Period)} className="w-28">
-            <option value="week">Weekly</option>
-            <option value="month">Monthly</option>
-            <option value="quarter">Quarterly</option>
-            <option value="year">Yearly</option>
-          </Select>
         </div>
+        {error && (
+          <p className="text-xs text-red-400 mt-1.5 text-right">{error}</p>
+        )}
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={300}>
@@ -228,12 +266,15 @@ export default function SpendChart({ rows }: Props) {
             />
 
             {dimValues.map((dv, i) => {
-              const color = PALETTE[i % PALETTE.length];
+              const dimColor       = PALETTE[i % PALETTE.length];
+              const colorActual    = isComparing ? CMP_ACTUAL    : dimColor;
+              const colorForecastA = isComparing ? CMP_VERSION_A : dimColor;
+              const colorForecastB = isComparing ? CMP_VERSION_B : dimColor;
               const label = dv === "total" ? "" : ` ${dv}`;
               return [
-                <Line key={`${dv}_actual`}    dataKey={`${dv}_actual`}    stroke={color} strokeWidth={2} dot={false} name={`Actual${label}`}    connectNulls={false} legendType="none" />,
-                <Line key={`${dv}_forecastA`} dataKey={`${dv}_forecastA`} stroke={color} strokeWidth={2} dot={false} name={`${getLabel(versionAId) ?? "A"}${label}`} strokeDasharray="6 3" connectNulls={false} legendType="none" />,
-                <Line key={`${dv}_forecastB`} dataKey={`${dv}_forecastB`} stroke={color} strokeWidth={2} dot={false} name={`${getLabel(versionBId) ?? "B"}${label}`} strokeDasharray="2 3" connectNulls={false} legendType="none" />,
+                <Line key={`${dv}_actual`}    dataKey={`${dv}_actual`}    stroke={colorActual}    strokeWidth={2} dot={false} name={`Actual${label}`}                         connectNulls={false} legendType="none" />,
+                <Line key={`${dv}_forecastA`} dataKey={`${dv}_forecastA`} stroke={colorForecastA} strokeWidth={2} dot={false} name={`${getLabel(versionAId) ?? "A"}${label}`} strokeDasharray="6 3" connectNulls={false} legendType="none" />,
+                <Line key={`${dv}_forecastB`} dataKey={`${dv}_forecastB`} stroke={colorForecastB} strokeWidth={2} dot={false} name={`${getLabel(versionBId) ?? "B"}${label}`} strokeDasharray="2 3" connectNulls={false} legendType="none" />,
               ];
             })}
           </LineChart>
@@ -244,6 +285,7 @@ export default function SpendChart({ rows }: Props) {
           palette={PALETTE}
           labelA={getLabel(versionAId)}
           labelB={getLabel(versionBId)}
+          isComparing={isComparing}
         />
       </CardContent>
     </Card>
