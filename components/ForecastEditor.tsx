@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef, Fragment } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from "react";
 import { ForecastRow, ForecastOperation, Game, Platform } from "@/lib/types";
 import { useSpendStore } from "@/lib/store";
 import { formatCurrency, getUniqueChannels, getUniqueGeos, getUniqueGames, getUniquePlatforms, addWeeksToDate } from "@/lib/utils";
@@ -127,8 +127,8 @@ function VersionPanel({ rows }: { rows: ForecastRow[] }) {
 }
 
 // ── Bulk Edit Panel ───────────────────────────────────────────────────────────
-function BulkEditPanel({ rows, forecastStart, forecastEnd }: {
-  rows: ForecastRow[]; forecastStart: string; forecastEnd: string;
+function BulkEditPanel({ rows, forecastStart, forecastEnd, onEndDateChange }: {
+  rows: ForecastRow[]; forecastStart: string; forecastEnd: string; onEndDateChange: (d: string) => void;
 }) {
   const { applyBulkOperation } = useSpendStore();
   const channels = useMemo(() => getUniqueChannels(rows), [rows]);
@@ -140,21 +140,24 @@ function BulkEditPanel({ rows, forecastStart, forecastEnd }: {
   const [selGeos, setSelGeos] = useState<string[]>([]);
   const [selGames, setSelGames] = useState<string[]>([]);
   const [selPlatforms, setSelPlatforms] = useState<string[]>([]);
-  const [startDate, setStartDate] = useState(forecastStart);
-  const [endDate, setEndDate] = useState(forecastEnd);
   const [direction, setDirection] = useState<"add" | "subtract">("add");
   const [method, setMethod] = useState<"pct" | "flat">("pct");
   const [value, setValue] = useState<string>("10");
   const [applied, setApplied] = useState(false);
+
+  const quickRanges = [
+    { label: "3 months", weeks: 13 },
+    { label: "6 months", weeks: 26 },
+    { label: "End of 2026", date: "2026-12-31" },
+  ];
 
   const affected = useMemo(() => rows.filter((row) => {
     if (selChannels.length > 0 && !selChannels.includes(row.channel)) return false;
     if (selGeos.length > 0 && !selGeos.includes(row.geo)) return false;
     if (selGames.length > 0 && !selGames.includes(row.game)) return false;
     if (selPlatforms.length > 0 && !selPlatforms.includes(row.platform)) return false;
-    if (row.date < startDate || row.date > endDate) return false;
     return true;
-  }).length, [rows, selChannels, selGeos, selGames, selPlatforms, startDate, endDate]);
+  }).length, [rows, selChannels, selGeos, selGames, selPlatforms]);
 
   const handleApply = () => {
     const action: ForecastOperation["action"] = method === "pct" ? "add_pct" : "add_flat";
@@ -162,7 +165,7 @@ function BulkEditPanel({ rows, forecastStart, forecastEnd }: {
     const op: ForecastOperation = {
       action, value: numVal,
       channels: selChannels, geos: selGeos, games: selGames, platforms: selPlatforms,
-      startDate, endDate,
+      startDate: forecastStart, endDate: forecastEnd,
       summary: `${direction} ${value}${method === "pct" ? "%" : "$"} to matching rows`,
     };
     applyBulkOperation(op);
@@ -178,6 +181,7 @@ function BulkEditPanel({ rows, forecastStart, forecastEnd }: {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Dimension selectors */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <DimSelector label="Channels" options={channels} selected={selChannels} onChange={setSelChannels} />
           <DimSelector label="GEOs" options={geos} selected={selGeos} onChange={setSelGeos} />
@@ -185,19 +189,32 @@ function BulkEditPanel({ rows, forecastStart, forecastEnd }: {
           <DimSelector label="Platforms" options={platforms} selected={selPlatforms} onChange={setSelPlatforms} />
         </div>
 
+        {/* Row 1: Period picker */}
+        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">Period:</label>
+          <span className="text-sm font-semibold text-foreground">{forecastStart}</span>
+          <span className="text-muted-foreground">→</span>
+          <input
+            type="date"
+            value={forecastEnd}
+            min={forecastStart}
+            max="2026-12-31"
+            onChange={(e) => onEndDateChange(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          {quickRanges.map((r) => (
+            <Button key={r.label} variant="outline" size="sm" className="text-xs"
+              onClick={() => {
+                const d = "date" in r ? r.date : addWeeksToDate(forecastStart, r.weeks);
+                if (d) onEndDateChange(d > "2026-12-31" ? "2026-12-31" : d);
+              }}>
+              {r.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* Row 2: Action controls */}
         <div className="flex flex-wrap items-end gap-3 border-t border-border pt-4">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">From</label>
-            <input type="date" value={startDate} min={forecastStart} max={forecastEnd}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">To</label>
-            <input type="date" value={endDate} min={forecastStart} max={forecastEnd}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
-          </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Action</label>
             <Select value={direction} onChange={(e) => setDirection(e.target.value as typeof direction)} className="w-28">
@@ -560,52 +577,11 @@ function ForecastTable({ rows }: { rows: ForecastRow[] }) {
 
 // ── Main ForecastEditor ───────────────────────────────────────────────────────
 export default function ForecastEditor({ rows, forecastStart, forecastEnd, onEndDateChange }: Props) {
-  const quickRanges = [
-    { label: "3 months", weeks: 13 },
-    { label: "6 months", weeks: 26 },
-    { label: "End of 2026", date: "2026-12-31" },
-  ];
-
   return (
     <div className="space-y-4">
-      {/* Horizon picker */}
-      <Card className="border-border bg-card">
-        <CardContent className="p-4">
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Forecast period:</label>
-              <span className="text-sm font-semibold text-foreground">{forecastStart}</span>
-              <span className="text-muted-foreground">→</span>
-              <input
-                type="date"
-                value={forecastEnd}
-                min={forecastStart}
-                max="2026-12-31"
-                onChange={(e) => onEndDateChange(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
-            <div className="flex items-center gap-1.5">
-              {quickRanges.map((r) => (
-                <Button key={r.label} variant="outline" size="sm" className="text-xs"
-                  onClick={() => {
-                    const d = "date" in r ? r.date : addWeeksToDate(forecastStart, r.weeks);
-                    onEndDateChange(d > "2026-12-31" ? "2026-12-31" : d);
-                  }}>
-                  {r.label}
-                </Button>
-              ))}
-            </div>
-            <span className="text-xs text-muted-foreground ml-auto">
-              {rows.length.toLocaleString()} forecast rows · {formatCurrency(rows.reduce((s, r) => s + r.forecast_spend, 0))} total
-            </span>
-          </div>
-        </CardContent>
-      </Card>
-
       <VersionPanel rows={rows} />
       <NLPPanel rows={rows} forecastStart={forecastStart} forecastEnd={forecastEnd} />
-      <BulkEditPanel rows={rows} forecastStart={forecastStart} forecastEnd={forecastEnd} />
+      <BulkEditPanel rows={rows} forecastStart={forecastStart} forecastEnd={forecastEnd} onEndDateChange={onEndDateChange} />
       <ForecastTable rows={rows} />
     </div>
   );
