@@ -18,13 +18,14 @@ export default function ForecastPage() {
     loadSpendRows().catch(console.error);
   }, []);
 
-  // Init or rebuild forecast skeleton when data loads or end date changes
+  // Build skeleton once spendRows are available (watch length, not isLoaded,
+  // to handle cases where isLoaded is stale-true from a previous session)
   useEffect(() => {
-    if (!isLoaded || spendRows.length === 0) return;
+    if (spendRows.length === 0) return;
     if (currentForecastRows.length > 0) return; // don't reset existing edits
     const skeleton = buildFutureForecastSkeleton(spendRows, FORECAST_START, forecastEnd);
     setCurrentForecastRows(skeleton);
-  }, [isLoaded]);
+  }, [spendRows.length]);
 
   const handleEndDateChange = (newEnd: string) => {
     if (!isLoaded || spendRows.length === 0 || newEnd === forecastEnd) return;
